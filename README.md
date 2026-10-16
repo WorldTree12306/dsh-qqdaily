@@ -95,7 +95,7 @@ $P python/qqdaily.py send   --期号 012
 - 模板目录（可复制改名换风格）：
 
 ```
-templates/template1/
+templates/example/
   模板.json              槽位表说明（各版放什么、有哪些开关）
   禁用词.txt             命中即不登（可换成你自己的表）
   程序/排特刊v3.py       排版器：JSON → HTML → PDF → 版图

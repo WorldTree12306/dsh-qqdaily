@@ -40,7 +40,7 @@ DEFAULTS = {
     "tmp": "",                  # 临时目录（无头浏览器 profile）
     "archive": "",              # 归档目录（可选）
     "paper": "群日报",           # 刊名
-    "template": "template1",    # 模板名（templates/ 下的目录名）
+    "template": "example",     # 模板名（templates/ 下的目录名）
     "templates_dir": "",        # 模板根目录，默认 <插件>/templates
     "edge": "",                 # 浏览器可执行文件；留空自动探测 Edge/Chrome
     "python": sys.executable,   # 解释器（插件层调用时用）
@@ -260,6 +260,15 @@ def cmd_check(cfg, args):
     content = getattr(args, "内容", "") or ""
     if content:
         env["QQDAILY_CONTENT"] = str(pathlib.Path(content))
+    # 语料：显式 --语料（可多次）→ 否则「项目语料 + tmp 里最新的窗口文件」
+    corpus = [c for c in (getattr(args, "语料", None) or []) if c]
+    if not corpus:
+        corpus_dir = pathlib.Path(cfg["base"]) / "1-聊天记录"
+        corpus += [str(p) for p in sorted(corpus_dir.glob("messages_*.jsonl"))]
+        for w in sorted(pathlib.Path(cfg["tmp"]).glob("窗口_*.jsonl"))[-3:]:
+            corpus.append(str(w))
+    if corpus:
+        env["QQDAILY_CORPUS"] = ";".join(corpus)
     rc = run([cfg.get("python") or sys.executable, str(tools / "校验.py"), args.期号], env=env)
     rc2 = run([cfg.get("python") or sys.executable, str(tools / "版心与字数.py"), args.期号], env=env)
     return rc or rc2
@@ -329,6 +338,8 @@ def main() -> int:
     p = sub.add_parser("check")
     p.add_argument("--期号", required=True)
     p.add_argument("--内容", default="", help="该期内容 JSON（校验引语用）")
+    p.add_argument("--语料", action="append", default=[],
+                   help="语料来源（可多次；支持通配）。默认用项目语料 + tmp 里最新几个窗口")
     p.set_defaults(f=cmd_check)
     p = sub.add_parser("send"); p.add_argument("--期号", required=True); p.set_defaults(f=cmd_send)
 

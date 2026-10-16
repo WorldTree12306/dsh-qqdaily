@@ -65,7 +65,7 @@ python python/qqdaily.py send    --issue 012
 - **Template directory** (swappable): `模板.json` (slot spec), `禁用词.txt` (banned words),
   `程序/排特刊v3.py` (typesetter), `程序/报纸版面模板.html` (layout CSS/markup).
 
-Copy `templates/template1` to `templates/template2`, restyle it, and point `template` at it.
+Copy `templates/example` to `templates/template2`, restyle it, and point `template` at it.
 
 ## Tests
 

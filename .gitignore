@@ -11,3 +11,6 @@ node_modules/
 __pycache__/
 *.pyc
 
+# 本项目自用模板（含特定报纸风格），不进公开仓库
+templates/template1/
+out-example/
