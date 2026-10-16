@@ -1,0 +1,40 @@
+{
+  "name": "dsh-qqdaily",
+  "version": "0.1.0",
+  "private": false,
+  "description": "把群聊变成一份报纸：OneBot 采集 → 话题统计 → 模板化排版 → 逐字校验 → 版图发群。配置驱动，版式模板可换。",
+  "keywords": [
+    "deepseek-harness",
+    "deepseek-harness-plugin",
+    "dsh-plugin",
+    "qq",
+    "onebot",
+    "napcat",
+    "newspaper",
+    "typesetting"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "main": "lib/index.js",
+  "files": [
+    "lib",
+    "python",
+    "templates",
+    "docs",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md"
+  ],
+  "scripts": {
+    "smoke": "node lib/smoke.mjs"
+  }
+}

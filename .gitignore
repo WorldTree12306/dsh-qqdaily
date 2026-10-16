@@ -1,0 +1,13 @@
+# dsh-qqdaily 运行期产物，别进仓库
+out/
+tmp/
+workspace/
+*.log
+
+# 个人配置（样例配置由 qqdaily.py init 生成）
+qqdaily.config.json
+node_modules/
+
+__pycache__/
+*.pyc
+

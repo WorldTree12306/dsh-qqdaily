@@ -1,0 +1,10 @@
+# dsh-qqdaily bundle patch — inserts the newspaper pipeline as a host plugin.
+# Install with:  dsh plugin --profile desktop add <this-directory-or-package-name>
+- insert:
+    - id: qqdaily
+      name: dsh-qqdaily
+      config:
+        # 全部可选；不写就用 ~/.dsh/qqdaily.json，再退回内置默认值
+        configPath: ""
+        promptPolicy: true
+        toolCallTimeoutMs: 1800000
