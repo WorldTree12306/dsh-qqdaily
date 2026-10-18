@@ -107,15 +107,26 @@ for ch in c["chapters"]:
     main += sum(han(p) for p in ch.get("body", []))
     main += sum(han(x) for x in (ch.get("credit") or [])) + han(ch.get("sign", ""))
 def mini_slots(doc):
-    """所有短刊版位：minis + 任意 p{N}_minis / p{N}_mid（含 p1/p2/p3/p4/p5/p6…）。"""
-    keys = ["minis"]
-    keys += [k for k in doc
-             if re.fullmatch(r"p\d+_(minis|mid)", k)]
+    """版面上所有短刊：minis ＋ 任意以 _minis 结尾的版位 ＋ 各版 _mid 里的 mini 块
+    ＋ p3_plan 里按标题引用的短刊（对开页的 left_mid / left_bottom / right_seq）。"""
+    keys = [k for k in doc if k == "minis" or k.endswith("_minis") or k.endswith("_mid")]
     out = []
     for k in keys:
         for m in (doc.get(k) or []):
             if isinstance(m, dict) and m.get("kind", "mini") == "mini":
                 out.append(m)
+    # 对开页：p3_plan 用标题引用源池里的短刊
+    by_title = {}
+    for k in doc:
+        if k == "minis" or k.endswith("_minis"):
+            for m in (doc.get(k) or []):
+                if isinstance(m, dict) and m.get("title"):
+                    by_title.setdefault(m["title"], m)
+    plan = doc.get("p3_plan") or {}
+    for key in ("left_mid", "left_bottom", "right_seq"):
+        for t in (plan.get(key) or []):
+            if t in by_title:
+                out.append(by_title[t])
     return out
 
 
@@ -130,3 +141,20 @@ print(f"\n正文汉字 {main}　小章节/语录汉字 {mini}　合计 {main + m
 print(f"大章节 {len(c['chapters'])}（含头条共 {len(c['chapters']) + 1}）"
       f"　小章节 {len(MINIS)}"
       f"　语录 {len(c.get('quotes') or [])}")
+
+# ── 门禁：任一项不过就非零退出（供 publish / CI 判定）──
+fails = []
+if bad:
+    fails.append(f"正文引语未命中 {len(bad)} 条")
+if bad2:
+    fails.append(f"语录/一句话未命中 {len(bad2)} 条")
+if hit:
+    fails.append(f"禁用词命中 {len(hit)} 个：{hit}")
+if len(MINIS) < 8:
+    fails.append(f"小章节仅 {len(MINIS)} 条（<8）")
+if fails:
+    print("\n结论：未通过")
+    for f in fails:
+        print("  ✗ " + f)
+    sys.exit(1)
+print("\n结论：全部通过")

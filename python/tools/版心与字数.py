@@ -29,9 +29,9 @@ except Exception:
     pass
 
 BASE = QD_BASE
-EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+EDGE = QD_EDGE or r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 if not pathlib.Path(EDGE).exists():
-    EDGE = r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+    EDGE = EDGE or r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
 
 if len(sys.argv) > 1:
     NO = sys.argv[1]

@@ -22,7 +22,7 @@ r"""特刊排版 v3 —— 量高后贪心装箱，让小章节/一句话自动�
 
 用法：
   python 程序\排特刊v3.py --内容 4-出报素材和日志\特刊内容_第009期.json \
-     --刊名 四号食堂日报 --期号 009 --日期 "2026 年 10 月 10 日　星期六" \
+     --刊名 群日报 --期号 001 --日期 "2026 年 10 月 10 日　星期六" \
      --时段 "10-08 20:00 — 10-10 22:00"
 """
 import argparse
@@ -38,6 +38,26 @@ QD_OUT = pathlib.Path(_qd("QQDAILY_OUT", str(QD_BASE / "5-报纸成品")))
 QD_TMP = pathlib.Path(_qd("QQDAILY_TMP", r"D:\ai\out"))
 QD_EDGE = _qd("QQDAILY_EDGE", "")
 QD_TPL = _qd("QQDAILY_TPL", "")
+# ── 品牌串：从 <模板>/模板.json 的「品牌」段读取，缺省回落到中性文案 ──
+def _brand():
+    d = {}
+    try:
+        import json as _json
+        cfg = _json.loads((pathlib.Path(__file__).resolve().parent.parent / "模板.json")
+                          .read_text(encoding="utf-8"))
+        d = cfg.get("品牌") or {}
+    except Exception:
+        d = {}
+    return d
+
+
+BRAND = _brand()
+
+
+def brand(key, default=""):
+    return str(BRAND.get(key) or default)
+
+
 import re
 import subprocess
 import sys
@@ -448,11 +468,11 @@ def measure_blocks(hp, page_no):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--内容", required=True)
-    ap.add_argument("--刊名", default="四号食堂日报")
+    ap.add_argument("--刊名", default=brand("默认刊名", "群日报"))
     ap.add_argument("--期号", required=True)
     ap.add_argument("--日期", default="")
     ap.add_argument("--时段", default="")
-    ap.add_argument("--署名", default="本报记者 蓝色大肥鱼")
+    ap.add_argument("--署名", default=brand("默认署名", "本报记者"))
     ap.add_argument("--引题", default="群内观察")
     ap.add_argument("--容量", type=int, default=1010,
                     help="每版初始装箱容量 px（只定初始切分，回流阶段不再调整）")
@@ -478,17 +498,17 @@ def main():
     stance = esc(moe.get("stance") or "头条谁聊得凶谁上")
     face = esc(moe.get("face") or "(*^▽^*)")
     tip = esc(moe.get("tip") or "排错了请骂排版机，别骂鱼。")
-    ed = esc(moe.get("editor") or "蓝色大肥鱼")
+    ed = esc(moe.get("editor") or brand("默认编辑", "编辑部"))
     note = esc(moe.get("editor_note") or "DSH 驱动 · 不吃饭不睡觉")
     ear2 = (f'<div class="ear"><b>本报立场</b>{stance} <b>{face}</b><br>{tip}'
             f'<br><b>编辑部</b>{ed}<span style="font-size:7.4pt">（{note}）</span></div>')
 
     masthead = f'''<div class="masthead">
- <div class="mh-top"><span>第 {o.期号} 期</span><span>四号饼干食堂 · 群友内部发行（非卖品）</span><span>定价：免费</span></div>
+ <div class="mh-top"><span>第 {o.期号} 期</span><span>{brand("报头中文", o.刊名 + " · 群友内部发行（非卖品）")}</span><span>定价：免费</span></div>
  <div class="mh-row">
   <div class="ear"><b>本期要目</b>{esc("　".join([hl.get("title")] + [x.get("title") for x in chap[:4]]))}</div>
   <div class="mh-title"><h1 class="title">{esc(o.刊名)}</h1>
-   <div class="mh-en">SIHAO BISCUIT CANTEEN DAILY</div></div>
+   <div class="mh-en">{brand("报头英文", "COMMUNITY DAILY")}</div></div>
   {ear2}
  </div>
  <div class="mh-top" style="margin-top:3px"><span>{esc(o.日期)}</span>
@@ -657,7 +677,7 @@ def main():
 
     hp = out / f"{o.刊名}_第{o.期号}期.html"
     folio = (lambda i: f'<div class="folio">{esc(o.刊名)}　第 {o.期号} 期　第 {i} 版　'
-                       f'四号饼干食堂（1095855618）内部发行</div>')
+                       f'{brand("页脚", o.刊名 + "　内部发行")}</div>')
 
     def build(pg_list):
         parts = build_p1()
@@ -937,7 +957,7 @@ def main():
                             f'{esc(m.get("title") or "答群友问")}</div>'
                             f'<div class="qa-q">{esc(m.get("asker"))}：'
                             f'{esc(m.get("question"))}</div>'
-                            f'<div class="qa-a">{esc(m.get("answerer") or "蓝色大肥鱼")}：'
+                            f'<div class="qa-a">{esc(m.get("answerer") or brand("默认答主", "编辑"))}：'
                             f'{esc(m.get("answer"))}</div></div>')
                     elif mk == "statbox":
                         _r = "".join(
