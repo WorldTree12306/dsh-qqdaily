@@ -22,6 +22,23 @@
 pip install pypdfium2          # 唯一的 Python 三方依赖
 ```
 
+## 三步上手
+
+```bash
+# ① 体检：环境、依赖、模板、配置、OneBot 逐项检查（可顺便列群号，或写一份样例配置）
+python python/qqdaily.py doctor --groups
+python python/qqdaily.py doctor --fix      # 没有配置时生成 ~/.dsh/qqdaily.json
+
+# ② 离线看效果：不连 OneBot，用随包示例（合成对话）直接排一期
+python python/qqdaily.py demo
+
+# ③ 出自己的群：填好配置里的 onebot.endpoint / token / group_id，然后
+python python/qqdaily.py fetch --since "2026-10-01 00:00" --label 001
+```
+
+`demo` 的成品在 `out/demo/`（PDF + 每版 PNG），`demo` 同时会跑一遍校验，
+看到「结论：全部通过」就说明装好了。示例对话与人物都是合成的，不含任何真实群聊内容。
+
 ## 安装
 
 ```bash
@@ -32,11 +49,13 @@ dsh plugin --profile desktop add <本目录或包名>
 
 | 工具 | 作用 |
 |---|---|
+| `qqdaily_doctor` | 体检：依赖/浏览器/模板/配置/OneBot，可选列群号 |
+| `qqdaily_demo` | 离线示例：不连 OneBot 直接排一期，验证安装 |
 | `qqdaily_status` | 查看生效配置与已装模板 |
 | `qqdaily_fetch` | 抓群消息窗口 |
 | `qqdaily_stats` | 窗口统计 |
 | `qqdaily_typeset` | 内容 JSON → HTML/PDF/版图 |
-| `qqdaily_check` | 引语逐字 / 禁用词 / 版心与字数 |
+| `qqdaily_check` | 引语逐字 / 禁用词 / 版心与字数（**有问题时返回非零**，可当门禁用） |
 | `qqdaily_send` | 发版图到群 |
 | `qqdaily_templates` | 列出版式模板 |
 

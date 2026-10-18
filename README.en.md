@@ -25,6 +25,17 @@ Everything is configuration-driven, and the page layout is a swappable template.
 pip install pypdfium2
 ```
 
+## Quick start
+
+```bash
+python python/qqdaily.py doctor --groups   # env / deps / browser / template / config / OneBot
+python python/qqdaily.py doctor --fix      # write a sample ~/.dsh/qqdaily.json
+python python/qqdaily.py demo              # offline sample paper (no OneBot needed)
+```
+
+`demo` renders the bundled synthetic sample into `out/demo/` (PDF + one PNG per page) and
+runs the full check, so a green run proves the installation works.
+
 ## Install
 
 ```bash
@@ -33,8 +44,8 @@ dsh plugin --profile desktop add <this-directory-or-package-name>
 
 The plugin mounts under the name `qqdaily` and registers:
 
-`qqdaily_status` · `qqdaily_fetch` · `qqdaily_stats` · `qqdaily_typeset` ·
-`qqdaily_check` · `qqdaily_send` · `qqdaily_templates`
+`qqdaily_doctor` · `qqdaily_demo` · `qqdaily_status` · `qqdaily_fetch` · `qqdaily_stats` ·
+`qqdaily_typeset` · `qqdaily_check` · `qqdaily_send` · `qqdaily_templates`
 
 ## Configure
 

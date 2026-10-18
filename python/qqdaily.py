@@ -239,7 +239,7 @@ def cmd_typeset(cfg, args):
            "--内容", args.内容, "--期号", args.期号,
            "--刊名", cfg["paper"],
            "--容量", str(args.capacity or cfg["layout"]["capacity"])]
-    date = args.日期 or cfg["layout"].get("date")
+    date = args.日期 or cfg["layout"].get("date") or auto_date()
     window = args.时段 or cfg["layout"].get("window")
     if date:
         cmd += ["--日期", date]
@@ -310,6 +310,157 @@ def cmd_send(cfg, args):
     return 0
 
 
+
+def auto_date() -> str:
+    """按本地日期生成中文日期串：「2026 年 10 月 18 日　星期日」（全角空格分隔）。"""
+    import datetime as _dt
+    wd = "一二三四五六日"[_dt.date.today().weekday()]
+    d = _dt.date.today()
+    return f"{d.year} 年 {d.month} 月 {d.day} 日　星期{wd}"
+
+
+def cmd_demo(cfg, args):
+    """离线示例：不碰 OneBot，直接用随包样例排一期，验证安装是否成功。"""
+    samples = PLUGIN / "samples"
+    content = samples / "内容_示例.json"
+    window = samples / "窗口_示例.jsonl"
+    if not content.exists():
+        print(f"找不到示例素材：{content}", file=sys.stderr)
+        return 2
+    demo_out = pathlib.Path(cfg["out"]) / "demo"
+    demo_tmp = pathlib.Path(cfg["tmp"]) / "demo"
+    demo_out.mkdir(parents=True, exist_ok=True)
+    demo_tmp.mkdir(parents=True, exist_ok=True)
+    env = env_for_typesetter(cfg)
+    env["QQDAILY_OUT"] = str(demo_out)
+    env["QQDAILY_TMP"] = str(demo_tmp)
+    ts = pathlib.Path(cfg["template_dir"]) / "程序" / "排特刊v3.py"
+    if not ts.exists():
+        print(f"模板里没有排版器：{ts}", file=sys.stderr)
+        return 2
+    cmd = [cfg.get("python") or sys.executable, str(ts),
+           "--内容", str(content), "--期号", "示例",
+           "--刊名", cfg.get("paper") or "示例日报",
+           "--日期", auto_date(),
+           "--署名", "示例编辑", "--引题", "示例",
+           "--容量", str(cfg["layout"]["capacity"])]
+    rc = run(cmd, env=env)
+    if rc != 0:
+        return rc
+    # 示例只做结构自检（引语与示例窗口逐字核对）
+    env2 = dict(env)
+    env2["QQDAILY_CONTENT"] = str(content)
+    env2["QQDAILY_CORPUS"] = str(window)
+    rc2 = run([cfg.get("python") or sys.executable,
+               str(PLUGIN / "python" / "tools" / "校验.py"), "示例"], env=env2)
+    print(f"\n示例成品：{demo_out}")
+    print("  提示：把配置里的 onebot.endpoint/token/group_id 填好，就能出自己群的真报了。")
+    return rc2
+
+
+def cmd_doctor(cfg, args):
+    """体检：环境依赖、模板完整性、配置可写、OneBot 可达与群列表。"""
+    import importlib.util
+    import urllib.request
+
+    rows = []
+    def check(name, fn):
+        try:
+            ok, detail = fn()
+        except Exception as e:
+            ok, detail = False, f"{type(e).__name__}: {e}"
+        rows.append((name, bool(ok), detail))
+
+    check("Python ≥ 3.10", lambda: (sys.version_info >= (3, 10), sys.version.split()[0]))
+    def _pdfium():
+        spec = importlib.util.find_spec("pypdfium2")
+        return (spec is not None, "已安装" if spec else "缺失：pip install pypdfium2")
+    check("pypdfium2（出 PDF/版图）", _pdfium)
+
+    def _edge():
+        import shutil as _sh
+        cands = ([cfg["edge"]] if cfg.get("edge") else []) + [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/usr/bin/microsoft-edge", "/usr/bin/google-chrome", "/usr/bin/chromium",
+        ]
+        for c in cands:
+            if c and pathlib.Path(c).exists():
+                return True, c
+        for exe in ("msedge", "google-chrome", "chromium", "chrome"):
+            p = _sh.which(exe)
+            if p:
+                return True, p
+        return False, "未找到 Edge/Chrome（可在配置里写 edge 路径）"
+    check("浏览器（无头打印 PDF）", _edge)
+
+    def _tpl():
+        d = pathlib.Path(cfg["template_dir"])
+        need = {"模板.json": d / "模板.json",
+                "排版器": d / "程序" / "排特刊v3.py",
+                "版面模板": d / "程序" / "报纸版面模板.html",
+                "禁用词表": d / "禁用词.txt"}
+        miss = [k for k, p in need.items() if not p.exists()]
+        return (not miss, f"{d.name}：{'齐全' if not miss else '缺 ' + '/'.join(miss)}")
+    check("版式模板", _tpl)
+
+    def _cfg():
+        p = pathlib.Path(cfg["_config_path"])
+        if p.exists():
+            return True, str(p)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            return True, f"{p}（可创建，建议先跑 init）"
+        except Exception as e:
+            return False, f"不可写：{e}"
+    check("配置文件", _cfg)
+    check("输出目录", lambda: (pathlib.Path(cfg["out"]).parent.exists(), cfg["out"]))
+
+    ob = cfg.get("onebot") or {}
+    def _onebot():
+        if not ob.get("group_id"):
+            return False, "未配置 onebot.group_id"
+        hdr = {"User-Agent": "Mozilla/5.0"}
+        if ob.get("token"):
+            hdr["Authorization"] = f"Bearer {ob['token']}"
+        url = ob["endpoint"].rstrip("/") + "/get_login_info"
+        with urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=8) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        who = (d.get("data") or {})
+        return True, f"在线：{who.get('nickname')}（{who.get('user_id')}）"
+    check("OneBot 在线", _onebot)
+
+    print("=== qqdaily 体检 ===")
+    for name, ok, detail in rows:
+        print(f"  {'✓' if ok else '✗'} {name}：{detail}")
+
+    # 群列表（可选，方便挑群号）
+    if args.groups and ob.get("group_id") is not None:
+        try:
+            hdr = {"User-Agent": "Mozilla/5.0"}
+            if ob.get("token"):
+                hdr["Authorization"] = f"Bearer {ob['token']}"
+            url = ob["endpoint"].rstrip("/") + "/get_group_list"
+            with urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=10) as r:
+                gl = json.loads(r.read().decode("utf-8")).get("data") or []
+            print(f"\n=== 群列表（{len(gl)} 个，把 id 填进配置的 onebot.group_id）===")
+            for g in gl[:40]:
+                print(f"  {g.get('group_id')}  {g.get('group_name')}")
+        except Exception as e:
+            print(f"群列表读取失败：{e}")
+
+    bad = [r for r in rows if not r[1]]
+    if bad:
+        print(f"\n{len(bad)} 项待处理。")
+        if args.fix:
+            print("尝试 --fix：写一份样例配置（不覆盖已有文件）…")
+            cmd_init(cfg, type("A", (), {"force": False})())
+        return 1
+    print("\n全部就绪。下一步：python/qqdaily.py demo（离线看效果）或 fetch（拉自己的群）")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="qqdaily", description="配置驱动的群日报流水线")
     ap.add_argument("--config", help="配置文件路径")
@@ -342,6 +493,11 @@ def main() -> int:
                    help="语料来源（可多次；支持通配）。默认用项目语料 + tmp 里最新几个窗口")
     p.set_defaults(f=cmd_check)
     p = sub.add_parser("send"); p.add_argument("--期号", required=True); p.set_defaults(f=cmd_send)
+    sub.add_parser("demo").set_defaults(f=cmd_demo)
+    p = sub.add_parser("doctor")
+    p.add_argument("--fix", action="store_true", help="发现问题时写一份样例配置")
+    p.add_argument("--groups", action="store_true", help="列出 OneBot 里的群（方便挑群号）")
+    p.set_defaults(f=cmd_doctor)
 
     args = ap.parse_args()
     cfg = load_config(args.config)
