@@ -511,6 +511,11 @@ def cmd_draft(cfg, args):
     tpl_dir = pathlib.Path(cfg["template_dir"])
     columns = pipe.columns_of(cfg, tpl_dir)
     digests = pipe.write_digests(work, rows, columns)
+    # 素材为 0 的栏目不派稿（写了也是凭空编）
+    empty = [c for c in columns if digests[c]["rows"] == 0]
+    if empty:
+        print(f"  跳过素材为 0 的栏目：{'、'.join(empty)}")
+        columns = {c: v for c, v in columns.items() if c not in empty}
     (work / "骨架.json").write_text(json.dumps(pipe.skeleton(tpl_dir), ensure_ascii=False, indent=1),
                                     encoding="utf-8")
     task = pipe.write_task(work, label, stats, columns, digests, _date_example())

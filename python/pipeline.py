@@ -237,7 +237,8 @@ def assemble(work: pathlib.Path, columns: dict, stats: dict, masthead: dict | No
     """把 稿/*.json 填进槽位，产出 内容.json（同样输入必得同样输出）。"""
     chaps, short = _load_drafts(work, columns)
     if not chaps:
-        raise SystemExit("稿/ 里还没有任何栏目稿，先按 任务单.md 写稿")
+        print("稿/ 里还没有任何栏目稿，先按 任务单.md 写稿", file=sys.stderr)
+        raise SystemExit(3)   # 3 = 等稿（与校验失败 1 区分开）
     M = [{"title": m.get("标题") or m.get("title") or "",
           "text": m.get("正文") or m.get("text") or ""} for m in short.get("短刊") or []]
     L = [{"text": (m.get("文本") or m.get("text") or "").strip().strip("「」"),
