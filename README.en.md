@@ -92,6 +92,16 @@ then you fix the drafts and re-run with `--resume`. Assembly is deterministic.
 
 Copy `templates/example` to `templates/template2`, restyle it, and point `template` at it.
 
+## Without OneBot
+
+- `fetch --from-file <path>` imports any chat export: window JSONL, or a Telegram export
+  (`messages[].date/from/text`).
+- `send.sink` selects the output: `onebot` (default, images only unless `send.text=true`) or
+  `file` (archive page PNGs to `<out>/sent/<issue>/`, posting nothing).
+- Pages are copied to ASCII-only filenames before upload (real OneBot 403s on CJK image paths).
+- `typeset` runs a contract check first: misspelled slots (e.g. `p1_mini`), missing headline or
+  chapters, and empty page slots are reported by name.
+
 ## Tests
 
 ```bash

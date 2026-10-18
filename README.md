@@ -81,7 +81,7 @@ python python/qqdaily.py config    # 看生效值
   "edge": "",                         // 浏览器可执行文件；空=自动探测
   "python": "python",                 // 解释器路径
   "onebot": { "endpoint": "http://127.0.0.1:3001", "token": "", "group_id": 123456 },
-  "send": { "images": true, "text": false },
+  "send": { "sink": "onebot", "images": true, "text": false },   // sink: onebot | file
   "layout": { "capacity": 1010, "byline": "本报记者", "kicker": "群内观察" },
   "limits": { "min_pages": 4, "min_total_hanzi": 3500, "min_page_hanzi": 600,
               "min_gap_px": 6, "max_hole_px": 300 }
@@ -152,6 +152,16 @@ python python/qqdaily.py publish --label 014 --resume --send   # 校验过了才
 - 拼版是**确定性**的：同样输入必得同样内容 JSON；想手工微调就直接改 `内容.json`；
 - 工作目录：`<tmp>/工作_<label>/`（窗口、素材、骨架、任务单、稿、内容、状态）。
 - 栏目怎么切由模板的 `模板.json` 的「栏目」段决定，换成自己群的叫法与关键词即可。
+
+## 不发群也能用：素材导入与归档
+
+- **任意聊天导出都能喂进来**：`fetch --from-file <文件>` 支持窗口 JSONL，
+  也支持 Telegram 导出 JSON（`messages[].date/from/text`）；没有 OneBot 也能出报。
+- **send 有两种出口**（配置 `send.sink`）：
+  - `onebot`（默认）：发到群，**只发版图**；`send.text=true` 才会补一条文字；
+  - `file`：只把版图归档到 `<out>/sent/<期号>/`，一个字节都不发出去。
+- 发送前会自动把版图复制成**纯 ASCII 文件名**（真 OneBot 对中文图片路径会 403）。
+- `typeset` 会先做**契约自检**：槽位名拼错（如 `p1_mini`）、缺头条/章节、版位留空都会点名提醒。
 
 ## 设计说明
 

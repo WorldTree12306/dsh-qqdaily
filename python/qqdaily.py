@@ -45,7 +45,7 @@ DEFAULTS = {
     "edge": "",                 # 浏览器可执行文件；留空自动探测 Edge/Chrome
     "python": sys.executable,   # 解释器（插件层调用时用）
     "onebot": {"endpoint": "http://127.0.0.1:3001", "token": "", "group_id": 0},
-    "send": {"images": True, "text": False},
+    "send": {"sink": "onebot", "images": True, "text": False},
     "layout": {"capacity": 1010, "byline": "本报记者", "kicker": "群内观察",
                "date": "", "window": ""},
     "limits": {"min_pages": 4, "min_total_hanzi": 3500, "min_page_hanzi": 600,
@@ -127,7 +127,7 @@ def cmd_init(cfg, args):
         "template": "template1",
         "edge": "",
         "onebot": {"endpoint": "http://127.0.0.1:3001", "token": "", "group_id": 0},
-        "send": {"images": True, "text": False},
+        "send": {"sink": "onebot", "images": True, "text": False},
         "layout": {"capacity": 1010, "byline": "本报记者 蓝色大肥鱼", "kicker": "群内观察"},
     }
     p.write_text(json.dumps(sample, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -192,8 +192,71 @@ def cmd_stats(cfg, args):
     return 0
 
 
+def _import_rows(src: pathlib.Path) -> list[dict]:
+    """把任意聊天导出转成窗口格式：[{time, sender, content}]。
+       支持：窗口 JSONL（time/sender/content）、Telegram 导出 JSON（messages[].date/from/text）。"""
+    import datetime as _dt
+    text = src.read_text(encoding="utf-8", errors="replace")
+    rows = []
+    stripped = text.lstrip()
+    if stripped.startswith("{") or stripped.startswith("["):
+        try:
+            data = json.loads(text)
+        except Exception:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("messages"), list):
+            for m in data["messages"]:
+                if not isinstance(m, dict):
+                    continue
+                ts = m.get("date") or ""
+                if isinstance(ts, (int, float)):
+                    ts = _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    ts = str(ts).replace("T", " ")[:19]
+                who = m.get("from") or (m.get("from_id") if isinstance(m.get("from_id"), str) else "") or "?"
+                body = m.get("text")
+                if isinstance(body, list):
+                    body = "".join(b if isinstance(b, str) else str(b.get("text", "")) for b in body)
+                rows.append({"time": ts, "sender": str(who), "content": str(body or "")})
+            return rows
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(r, dict):
+            continue
+        ts = r.get("time") or r.get("date") or ""
+        if isinstance(ts, (int, float)):
+            ts = _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+        who = r.get("sender") or r.get("from") or r.get("nickname") or "?"
+        body = r.get("content") or r.get("text") or ""
+        if isinstance(body, list):
+            body = "".join(b if isinstance(b, str) else str(b.get("text", "")) for b in body)
+        rows.append({"time": str(ts)[:19].replace("T", " "), "sender": str(who),
+                     "content": str(body)})
+    return rows
+
+
 def cmd_fetch(cfg, args):
     import urllib.request
+    if getattr(args, "from_file", ""):
+        src = pathlib.Path(args.from_file)
+        if not src.exists():
+            print(f"找不到导入文件：{src}", file=sys.stderr)
+            return 2
+        rows = _import_rows(src)
+        dest = pathlib.Path(args.out) if getattr(args, "out", "") else \
+            pathlib.Path(cfg["tmp"]) / f"窗口_{getattr(args, 'label', '') or src.stem}.jsonl"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with dest.open("w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        print(f"从文件导入 {len(rows)} 条 → {dest}")
+        return 0
     ob = cfg["onebot"]
     if not ob.get("group_id"):
         print("配置里没写 onebot.group_id", file=sys.stderr)
@@ -228,7 +291,38 @@ def cmd_fetch(cfg, args):
     return 0
 
 
+KNOWN_KEYS = {
+    "headline", "chapters", "minis", "quotes", "notice", "masthead",
+    "p1_minis", "p2_minis", "p2_side_minis", "p2_mid", "p3_plan", "p4_minis", "p4_mid",
+    "p5_mid", "p6_mid", "vlead_chapter", "vlead_mini", "vlead_mini_horiz",
+    "vlead_image", "vlead_image_in_region", "_说明",
+}
+
+
+def _contract_check(content_path: pathlib.Path) -> list[str]:
+    """轻量契约自检：拼错的槽位名会被点名（不会静默丢版）。"""
+    try:
+        doc = json.loads(pathlib.Path(content_path).read_text(encoding="utf-8"))
+    except Exception as e:
+        return [f"内容 JSON 读不出来：{e}"]
+    warn = []
+    unknown = sorted(set(doc) - KNOWN_KEYS)
+    if unknown:
+        warn.append("未知槽位（拼错了？会被忽略）：" + "、".join(unknown))
+    if not doc.get("headline"):
+        warn.append("缺 headline（头条）")
+    if not doc.get("chapters"):
+        warn.append("缺 chapters（章节）")
+    empty = [k for k in ("p1_minis", "p2_minis", "p2_side_minis", "p4_mid", "p5_mid")
+             if k in doc and not doc.get(k)]
+    if empty:
+        warn.append("这些版位是空的：" + "、".join(empty))
+    return warn
+
+
 def cmd_typeset(cfg, args):
+    for w in _contract_check(args.内容):
+        print(f"  ! {w}")
     ts = pathlib.Path(cfg["template_dir"]) / "程序" / "排特刊v3.py"
     if not ts.exists():
         print(f"模板里没有排版器：{ts}", file=sys.stderr)
@@ -274,41 +368,117 @@ def cmd_check(cfg, args):
     return rc or rc2
 
 
-def cmd_send(cfg, args):
+def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> dict:
+    """向 OneBot 发一个 JSON POST。urllib 被拦时自动退回本机 PowerShell / curl。"""
+    import json as _json
+    import platform
+    import subprocess as _sp
+    import tempfile
     import urllib.request
-    ob = cfg["onebot"]
-    if not ob.get("group_id"):
-        print("配置里没写 onebot.group_id", file=sys.stderr)
+
+    body = _json.dumps(payload, ensure_ascii=False)
+    try:
+        req = urllib.request.Request(url, data=body.encode("utf-8"), headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return _json.loads(r.read().decode("utf-8"))
+    except Exception as first:
+        tmp = pathlib.Path(tempfile.gettempdir()) / "qqdaily_payload.json"
+        tmp.write_text(body, encoding="utf-8")
+        if platform.system() == "Windows":
+            ps = (
+                "$h=@{"
+                + ";".join(f"'{k}'='{v}'" for k, v in headers.items())
+                + "}; "
+                f"Invoke-RestMethod -Method Post -Uri '{url}' -Headers $h "
+                f"-ContentType 'application/json; charset=utf-8' -InFile '{tmp}' -TimeoutSec {timeout} "
+                "| ConvertTo-Json -Depth 8 -Compress"
+            )
+            try:
+                out = _sp.run(["powershell", "-NoProfile", "-Command", ps],
+                              capture_output=True, text=True, encoding="utf-8", timeout=timeout + 30)
+                if out.returncode == 0 and out.stdout.strip():
+                    return _json.loads(out.stdout)
+            except Exception:
+                pass
+        try:
+            out = _sp.run(["curl", "-sS", "-X", "POST", url,
+                           "-H", "Content-Type: application/json",
+                           *sum((["-H", f"{k}: {v}"] for k, v in headers.items() if k != "Content-Type"), []),
+                           "--data-binary", "@" + str(tmp)],
+                          capture_output=True, text=True, encoding="utf-8", timeout=timeout + 30)
+            if out.returncode == 0 and out.stdout.strip():
+                return _json.loads(out.stdout)
+        except Exception:
+            pass
+        raise first
+
+
+def _issue_pages(cfg, issue: str) -> list[pathlib.Path]:
+    out = pathlib.Path(cfg["out"])
+    pages = [p for p in out.glob(f"*{issue}*第*版.png")]
+    if not pages:
+        pages = list(out.glob("第*版.png"))
+    return sorted(pages, key=lambda p: int(re.search(r"第(\d+)版", p.name).group(1)))
+
+
+def cmd_send(cfg, args):
+    """发群。sink=onebot（默认，只发版图）或 file（只把版图归档到 <out>/sent/）。"""
+    send_cfg = cfg.get("send") or {}
+    sink = str(send_cfg.get("sink") or "onebot").lower()
+    pages = _issue_pages(cfg, args.期号)
+    if not pages:
+        print(f"{cfg['out']} 下没找到该期版图（先 typeset）", file=sys.stderr)
         return 2
-    hdr = {"Content-Type": "application/json",
-           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    print(f"版图 {len(pages)} 张：{', '.join(p.name for p in pages)}")
+
+    if sink == "file":
+        dest = pathlib.Path(cfg["out"]) / "sent" / str(args.期号)
+        dest.mkdir(parents=True, exist_ok=True)
+        for p in pages:
+            (dest / p.name).write_bytes(p.read_bytes())
+        print(f"已归档到 {dest}（sink=file：没有发到任何群）")
+        return 0
+
+    ob = cfg.get("onebot") or {}
+    if not ob.get("group_id"):
+        print("配置里没写 onebot.group_id（或把 send.sink 设为 file 只归档）", file=sys.stderr)
+        return 2
+    hdr = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     if ob.get("token"):
         hdr["Authorization"] = f"Bearer {ob['token']}"
-    out = pathlib.Path(cfg["out"])
-    pages = sorted(out.glob(f"*{args.期号}*第*版.png"),
-                   key=lambda p: int(re.search(r"第(\d+)版", p.name).group(1)))
-    if not pages:
-        pages = sorted(out.glob("第*版.png"))
-    if not pages:
-        print(f"{out} 下没找到该期版图", file=sys.stderr)
-        return 2
-    sent = []
-    for p in pages:
-        payload = {"group_id": ob["group_id"],
-                   "message": [{"type": "image", "data": {"file": "file:///" + str(p).replace('\\', '/')}}]}
-        req = urllib.request.Request(ob["endpoint"].rstrip("/") + "/send_group_msg",
-                                     data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                                     headers=hdr, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                res = json.loads(r.read().decode("utf-8"))
-            sent.append((p.name, res.get("status"), (res.get("data") or {}).get("message_id")))
-        except Exception as e:
-            sent.append((p.name, f"FAILED: {e}", None))
-    for name, st, mid in sent:
-        print(f"  {name} → {st} {mid or ''}")
-    return 0
+    endpoint = ob["endpoint"].rstrip("/")
 
+    # 真 OneBot 对中文路径的图片会 403：先复制成纯 ASCII 名再发
+    slug = re.sub(r"[^0-9A-Za-z_-]", "", str(args.期号)) or "issue"
+    safe_dir = pathlib.Path(cfg["tmp"]) / "send" / slug
+    safe_dir.mkdir(parents=True, exist_ok=True)
+
+    ok = 0
+    for idx, p in enumerate(pages, 1):
+        safe = safe_dir / f"p{idx:02d}{p.suffix.lower()}"
+        safe.write_bytes(p.read_bytes())
+        payload = {"group_id": ob["group_id"],
+                   "message": [{"type": "image",
+                                "data": {"file": "file:///" + str(safe).replace("\\", "/")}}]}
+        try:
+            res = _post_json(endpoint + "/send_group_msg", payload, hdr)
+            mid = (res.get("data") or {}).get("message_id")
+            print(f"  {p.name} → {res.get('status')} {mid or ''}（发送用 {safe.name}）")
+            ok += 1
+        except Exception as e:
+            print(f"  {p.name} → 失败：{e}", file=sys.stderr)
+
+    # send.text=true 时再补一条文字（默认关：本项目习惯只发图）
+    if send_cfg.get("text") and ok:
+        tip = f"{cfg.get('paper') or '群日报'} 第 {args.期号} 期，共 {len(pages)} 版。"
+        try:
+            res = _post_json(endpoint + "/send_group_msg",
+                             {"group_id": ob["group_id"],
+                              "message": [{"type": "text", "data": {"text": tip}}]}, hdr)
+            print(f"  文字：{res.get('status')}")
+        except Exception as e:
+            print(f"  文字发送失败：{e}", file=sys.stderr)
+    return 0 if ok == len(pages) else 1
 
 
 def auto_date() -> str:
@@ -631,6 +801,7 @@ def main() -> int:
     p.set_defaults(f=cmd_stats)
 
     p = sub.add_parser("fetch")
+    p.add_argument("--from-file", default="", help="从任意聊天导出导入（JSONL / Telegram JSON）")
     p.add_argument("--since", default=""); p.add_argument("--out", default="")
     p.add_argument("--label", default=""); p.add_argument("--count", type=int, default=500)
     p.set_defaults(f=cmd_fetch)
