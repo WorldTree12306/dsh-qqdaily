@@ -461,6 +461,157 @@ def cmd_doctor(cfg, args):
     return 0
 
 
+
+# ── 编辑部流水线（draft / assemble / publish）─────────────────────────
+def _pipeline():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("qqdaily_pipeline", PLUGIN / "python" / "pipeline.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _work_dir(cfg, label):
+    return pathlib.Path(cfg["tmp"]) / f"工作_{label}"
+
+
+def _date_example() -> str:
+    import datetime as _dt
+    d = _dt.date.today()
+    return f"{d.month}月{d.day}日{8}时30分"
+
+
+def cmd_draft(cfg, args):
+    """切栏目、出逐字素材 digest、内容骨架、写作任务单；必要时先 fetch。"""
+    pipe = _pipeline()
+    label = args.label
+    work = _work_dir(cfg, label)
+    work.mkdir(parents=True, exist_ok=True)
+    win = work / "窗口.jsonl"
+    if args.window:
+        src = pathlib.Path(args.window)
+        win.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        print(f"用现成窗口：{src}")
+    elif win.exists() and not args.since:
+        print(f"复用已有窗口：{win}")
+    else:
+        if not args.since:
+            print("需要 --since 或 --window（窗口起点）", file=sys.stderr)
+            return 2
+        rc = cmd_fetch(cfg, type("A", (), {"since": args.since, "out": str(win),
+                                            "label": label, "count": args.count})())
+        if rc != 0:
+            return rc
+    rows = pipe.read_window(win)
+    if not rows:
+        print("窗口是空的", file=sys.stderr)
+        return 2
+    stats = pipe.stats_of(rows)
+    (work / "统计.json").write_text(json.dumps(stats, ensure_ascii=False, indent=1), encoding="utf-8")
+    tpl_dir = pathlib.Path(cfg["template_dir"])
+    columns = pipe.columns_of(cfg, tpl_dir)
+    digests = pipe.write_digests(work, rows, columns)
+    (work / "骨架.json").write_text(json.dumps(pipe.skeleton(tpl_dir), ensure_ascii=False, indent=1),
+                                    encoding="utf-8")
+    task = pipe.write_task(work, label, stats, columns, digests, _date_example())
+    pipe.write_stage(work, stage="drafted", label=label, window=str(win),
+                     total=stats["total"], people=stats["people"])
+    print(f"\n工作目录：{work}")
+    print(f"  窗口 {stats['total']} 条 / {stats['people']} 人　{stats['from']} → {stats['to']}")
+    for c in columns:
+        print(f"  素材 {c}：{digests[c]['rows']} 条")
+    print(f"  任务单：{task}")
+    print("\n下一步：按 任务单.md 把 稿/<栏目>.json 与 稿/短刊.json 写出来，再跑 publish --resume")
+    return 0
+
+
+def cmd_assemble(cfg, args):
+    """把 稿/*.json 确定性拼成 内容.json。"""
+    pipe = _pipeline()
+    work = _work_dir(cfg, args.label)
+    if not (work / "窗口.jsonl").exists():
+        print(f"还没有工作目录：{work}（先跑 draft）", file=sys.stderr)
+        return 2
+    rows = pipe.read_window(work / "窗口.jsonl")
+    stats = pipe.stats_of(rows)
+    columns = pipe.columns_of(cfg, pathlib.Path(cfg["template_dir"]))
+    data = pipe.assemble(work, columns, stats)
+    pipe.write_stage(work, stage="assembled")
+    print(f"已拼版：{work / '内容.json'}")
+    print(f"  头条：{data['headline']['title']}（{data['headline']['kicker']}）")
+    n_mini = sum(1 for k in ("minis", "p1_minis", "p2_minis", "p2_side_minis", "p4_minis")
+                 for m in (data.get(k) or []) if isinstance(m, dict) and m.get("kind") == "mini")
+    n_mini += sum(1 for k in ("p4_mid", "p5_mid") for m in (data.get(k) or [])
+                  if isinstance(m, dict) and m.get("kind") == "mini")
+    n_mini += sum(len(data["p3_plan"].get(k) or []) for k in ("left_mid", "left_bottom"))
+    n_line = len(data.get("quotes") or []) + sum(1 for k in ("p4_minis", "p5_mid")
+                                                 for m in (data.get(k) or [])
+                                                 if isinstance(m, dict) and m.get("kind") == "line")
+    n_line += len((data.get("p3_plan") or {}).get("right_lines") or [])
+    print(f"  章节 {len(data['chapters'])} 篇（＋头条）｜短刊 {n_mini} 条｜语录/一句话 {n_line} 条")
+    return 0
+
+
+def cmd_publish(cfg, args):
+    """一条命令走完 排版 → 校验 →（可选）发群；没稿就先出草稿。"""
+    import shutil
+    pipe = _pipeline()
+    label = args.label
+    work = _work_dir(cfg, label)
+    st = pipe.read_stage(work)
+
+    if not work.exists() or args.since:
+        rc = cmd_draft(cfg, type("A", (), {"label": label, "window": args.window or "",
+                                            "since": args.since or "", "count": args.count})())
+        if rc != 0:
+            return rc
+        print("\n—— 草稿已就绪，需要先把 稿/ 写出来 ——")
+        return 3
+
+    if not (work / "内容.json").exists() or args.assemble:
+        rc = cmd_assemble(cfg, type("A", (), {"label": label})())
+        if rc != 0:
+            return rc
+
+    # 排版
+    content = work / "内容.json"
+    out_dir = pathlib.Path(cfg["out"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows = pipe.read_window(work / "窗口.jsonl")
+    stats = pipe.stats_of(rows)
+    env = env_for_typesetter(cfg)
+    ts = pathlib.Path(cfg["template_dir"]) / "程序" / "排特刊v3.py"
+    cmd = [cfg.get("python") or sys.executable, str(ts),
+           "--内容", str(content), "--期号", label,
+           "--刊名", cfg.get("paper") or "群日报",
+           "--日期", auto_date(),
+           "--时段", f"{stats['from'][5:16]} — {stats['to'][5:16]}",
+           "--容量", str(cfg["layout"]["capacity"])]
+    rc = run(cmd, env=env)
+    if rc != 0:
+        pipe.write_stage(work, stage="typeset-failed")
+        return rc
+
+    # 校验（门禁）
+    env2 = dict(env)
+    env2["QQDAILY_CONTENT"] = str(content)
+    env2["QQDAILY_CORPUS"] = str(work / "窗口.jsonl")
+    rc = run([cfg.get("python") or sys.executable,
+              str(PLUGIN / "python" / "tools" / "校验.py"), label], env=env2)
+    pipe.write_stage(work, stage="checked" if rc == 0 else "check-failed")
+    if rc != 0:
+        print("\n校验没过：按上面的清单改 稿/*.json，然后重跑 publish --resume", file=sys.stderr)
+        return rc
+
+    if args.send:
+        rc = cmd_send(cfg, type("A", (), {"期号": label})())
+        pipe.write_stage(work, stage="sent" if rc == 0 else "send-failed")
+        return rc
+    pipe.write_stage(work, stage="ready")
+    print(f"\n就绪（未发群）。核对后发：publish --label {label} --resume --send")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="qqdaily", description="配置驱动的群日报流水线")
     ap.add_argument("--config", help="配置文件路径")
@@ -494,6 +645,27 @@ def main() -> int:
     p.set_defaults(f=cmd_check)
     p = sub.add_parser("send"); p.add_argument("--期号", required=True); p.set_defaults(f=cmd_send)
     sub.add_parser("demo").set_defaults(f=cmd_demo)
+    p = sub.add_parser("draft")
+    p.add_argument("--label", required=True, help="期号，同时作为工作目录名")
+    p.add_argument("--since", default="", help="窗口起点（会自动 fetch）")
+    p.add_argument("--window", default="", help="用现成窗口 jsonl，不 fetch")
+    p.add_argument("--count", type=int, default=3000)
+    p.set_defaults(f=cmd_draft)
+
+    p = sub.add_parser("assemble")
+    p.add_argument("--label", required=True)
+    p.set_defaults(f=cmd_assemble)
+
+    p = sub.add_parser("publish")
+    p.add_argument("--label", required=True)
+    p.add_argument("--since", default="")
+    p.add_argument("--window", default="")
+    p.add_argument("--count", type=int, default=3000)
+    p.add_argument("--resume", action="store_true", help="沿用已有工作目录（不重新 draft）")
+    p.add_argument("--assemble", action="store_true", help="强制重新拼版")
+    p.add_argument("--send", action="store_true", help="校验通过后发群")
+    p.set_defaults(f=cmd_publish)
+
     p = sub.add_parser("doctor")
     p.add_argument("--fix", action="store_true", help="发现问题时写一份样例配置")
     p.add_argument("--groups", action="store_true", help="列出 OneBot 里的群（方便挑群号）")

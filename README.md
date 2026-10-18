@@ -133,6 +133,26 @@ templates/example/
   <日报/刊名缩写>_第N版.png   每版一张，用于发群
 ```
 
+## 一键出报（publish）
+
+一条状态机走完「切素材 → 写稿 → 拼版 → 排版 → 校验 → 发群」，写稿这一步交给 agent：
+
+```bash
+# ① 出草稿：切栏目、生成逐字素材、内容骨架、写作任务单（会自动 fetch 或吃现成窗口）
+python python/qqdaily.py draft --label 014 --since "2026-10-17 22:00"
+
+# ② 让 agent 按 任务单.md 写 稿/<栏目>.json 与 稿/短刊.json（写稿这一步不归插件管）
+
+# ③ 一键出报：拼版 → 排版 → 校验门禁 →（可选）发群
+python python/qqdaily.py publish --label 014 --resume
+python python/qqdaily.py publish --label 014 --resume --send   # 校验过了才发
+```
+
+- `publish` 在**校验不过时直接非零退出**，并把未命中的引语/禁用词/缺项逐条列出，改完再 `--resume`；
+- 拼版是**确定性**的：同样输入必得同样内容 JSON；想手工微调就直接改 `内容.json`；
+- 工作目录：`<tmp>/工作_<label>/`（窗口、素材、骨架、任务单、稿、内容、状态）。
+- 栏目怎么切由模板的 `模板.json` 的「栏目」段决定，换成自己群的叫法与关键词即可。
+
 ## 设计说明
 
 - **路径全配置化**：排版器与校验脚本读环境变量（`QQDAILY_BASE/OUT/TMP/EDGE/TPL/PAPER/BAN`），

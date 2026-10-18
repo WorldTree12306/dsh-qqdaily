@@ -69,6 +69,20 @@ python python/qqdaily.py check   --issue 012
 python python/qqdaily.py send    --issue 012
 ```
 
+## One-command publish
+
+A persisted state machine: split material → draft → assemble → typeset → check → send.
+Writing itself is the agent's job (the plugin never calls an LLM).
+
+```bash
+python python/qqdaily.py draft --label 014 --since "2026-10-17 22:00"
+# ... the agent writes 稿/<column>.json and 稿/短刊.json ...
+python python/qqdaily.py publish --label 014 --resume [--send]
+```
+
+`publish` exits non-zero when the gate fails and lists every unmatched quote / banned word,
+then you fix the drafts and re-run with `--resume`. Assembly is deterministic.
+
 ## Content vs. layout
 
 - **Content JSON** (yours): `headline`, `chapters`, `minis`, `quotes`, per-page slots
