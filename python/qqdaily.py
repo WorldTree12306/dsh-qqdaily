@@ -416,6 +416,8 @@ def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> di
 def _issue_pages(cfg, issue: str) -> list[pathlib.Path]:
     out = pathlib.Path(cfg["out"])
     pages = [p for p in out.glob(f"*{issue}*第*版.png")]
+    if not pages:   # demo 等成品在子目录里
+        pages = [p for p in out.glob(f"**/*{issue}*第*版.png")]
     if not pages:
         pages = list(out.glob("第*版.png"))
     return sorted(pages, key=lambda p: int(re.search(r"第(\d+)版", p.name).group(1)))
