@@ -265,12 +265,28 @@ def cmd_fetch(cfg, args):
            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     if ob.get("token"):
         hdr["Authorization"] = f"Bearer {ob['token']}"
-    body = json.dumps({"group_id": ob["group_id"], "count": args.count}).encode()
-    req = urllib.request.Request(ob["endpoint"].rstrip("/") + "/get_group_msg_history",
-                                 data=body, headers=hdr, method="POST")
-    with urllib.request.urlopen(req, timeout=60) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    msgs = (data.get("data") or {}).get("messages") or []
+    # NapCat 的 get_group_msg_history 返回不稳定（同样的 count 每次给的结果集不同），
+    # 所以连拉几轮、按 message_id 取并集，避免漏消息。
+    passes = max(1, int(getattr(args, "passes", 3) or 3))
+    merged = {}
+    for i in range(passes):
+        body = json.dumps({"group_id": ob["group_id"], "count": args.count}).encode()
+        req = urllib.request.Request(ob["endpoint"].rstrip("/") + "/get_group_msg_history",
+                                     data=body, headers=hdr, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=90) as r:
+                data = json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            if i == 0:
+                raise
+            print(f"  第 {i+1} 轮回捞失败（忽略）：{e}", file=sys.stderr)
+            continue
+        got = (data.get("data") or {}).get("messages") or []
+        for m in got:
+            merged[m.get("message_id")] = m
+        if len(got) == 0:
+            break
+    msgs = list(merged.values())
     rows = []
     for m in msgs:
         text = "".join(seg.get("data", {}).get("text", "") for seg in m.get("message", [])
@@ -803,6 +819,7 @@ def main() -> int:
     p.set_defaults(f=cmd_stats)
 
     p = sub.add_parser("fetch")
+    p.add_argument("--passes", type=int, default=3, help="回捞轮数（并集去重，默认 3）")
     p.add_argument("--from-file", default="", help="从任意聊天导出导入（JSONL / Telegram JSON）")
     p.add_argument("--since", default=""); p.add_argument("--out", default="")
     p.add_argument("--label", default=""); p.add_argument("--count", type=int, default=500)

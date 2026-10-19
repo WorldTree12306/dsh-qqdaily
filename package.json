@@ -1,6 +1,6 @@
 {
   "name": "dsh-qqdaily",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "description": "把群聊变成一份报纸：OneBot 采集 → 栏目切分 → 模板化排版 → 逐字校验 → 版图发群。三步上手，一键出报。",
   "keywords": [
